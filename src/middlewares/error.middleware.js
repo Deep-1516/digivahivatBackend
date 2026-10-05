@@ -28,8 +28,12 @@ const errorHandler = (err, _req, res, _next) => {
   // ── MongoDB: Duplicate Key (e.g., unique phone) ───────────────────────────
   if (err.code === 11000) {
     statusCode = 409;
-    const field = Object.keys(err.keyValue)[0];
-    message    = `A resident with this ${field} already exists.`;
+    const field = err.keyValue ? Object.keys(err.keyValue)[0] : 'field';
+    if (field === 'phone') {
+      message = 'A resident with this phone number already exists.';
+    } else {
+      message = `A record with this ${field} already exists.`;
+    }
   }
 
   // ── JWT errors ────────────────────────────────────────────────────────────
