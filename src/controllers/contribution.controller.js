@@ -28,7 +28,7 @@ const recordContribution = async (req, res, next) => {
     const resident = await Resident.findById(residentId);
     if (!resident) return res.status(404).json({ success: false, message: 'Resident not found.' });
 
-    // ── For Event type: validate event exists ─────────────────────────────
+    // ── For Event type: validate event exists & resident not excluded ─────
     let event = null;
     if (contributionType === 'Event') {
       if (!eventId) {
@@ -36,6 +36,16 @@ const recordContribution = async (req, res, next) => {
       }
       event = await Event.findById(eventId);
       if (!event) return res.status(404).json({ success: false, message: 'Event not found.' });
+
+      const isExcluded = event.excludedResidents?.some(
+        (id) => (id._id ? id._id.toString() : id.toString()) === residentId.toString()
+      );
+      if (isExcluded) {
+        return res.status(400).json({
+          success: false,
+          message: `${resident.name} is excluded from "${event.title}" and cannot make payments for this event.`,
+        });
+      }
     }
 
     // ── For Annual type: validate year ────────────────────────────────────
