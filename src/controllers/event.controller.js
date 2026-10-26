@@ -11,7 +11,7 @@ const Expense      = require('../models/Expense.model');
 // ─── POST /api/events (Admin only) ───────────────────────────────────────────
 const createEvent = async (req, res, next) => {
   try {
-    const { title, description, targetBudget, perHouseAmount, startDate, endDate } = req.body;
+    const { title, description, targetBudget, perHouseAmount, startDate, endDate, excludedResidents } = req.body;
 
     const societyId = req.user.societyId?._id || req.user.societyId;
     if (!societyId) {
@@ -26,6 +26,7 @@ const createEvent = async (req, res, next) => {
       perHouseAmount: perHouseAmount || 0,
       startDate:  startDate  || Date.now(),
       endDate:    endDate    || null,
+      excludedResidents: Array.isArray(excludedResidents) ? excludedResidents : [],
       createdBy:  req.user._id,
     });
 
@@ -46,9 +47,15 @@ const getAllEvents = async (req, res, next) => {
       filter.societyId = req.query.societyId;
     }
 
+    // Exclude events for residents who have been explicitly excluded
+    if (req.user.role === 'Resident') {
+      filter.excludedResidents = { $ne: req.user._id };
+    }
+
     const events = await Event.find(filter)
       .populate('createdBy', 'name phone')
       .populate('societyId', 'name')
+      .populate('excludedResidents', 'name houseOrFlatNo phone')
       .sort({ createdAt: -1 });
 
     res.json({ success: true, data: events });
@@ -61,27 +68,18 @@ const getAllEvents = async (req, res, next) => {
 /**
  * Real-time financial summary for a single event.
  * Uses MongoDB $group aggregations to compute sums in one round-trip each.
- *
- * Response shape:
- * {
- *   event           : { ...eventDoc },
- *   totalCollection : Number,
- *   totalExpenses   : Number,
- *   netBalance      : Number,   // collection - expenses
- *   budgetProgress  : Number,   // % of targetBudget collected
- *   contributorsCount: Number,
- *   expensesCount    : Number,
- * }
  */
 const getEventDashboard = async (req, res, next) => {
   try {
-    const event = await Event.findById(req.params.id).populate('createdBy', 'name');
+    const event = await Event.findById(req.params.id)
+      .populate('createdBy', 'name')
+      .populate('excludedResidents', 'name houseOrFlatNo phone');
     if (!event) {
       return res.status(404).json({ success: false, message: 'Event not found.' });
     }
 
     // Parallel aggregations for performance (Only Approved expenses affect financial balance)
-    const [collectionResult, expenseResult, contributorsCount, expensesCount, pendingExpensesCount] =
+    const [collectionResult, expenseResult, paidResidents, totalContributionsCount, expensesCount, pendingExpensesCount] =
       await Promise.all([
         Contribution.aggregate([
           { $match: { eventId: event._id } },
@@ -91,6 +89,7 @@ const getEventDashboard = async (req, res, next) => {
           { $match: { eventId: event._id, status: 'Approved' } },
           { $group: { _id: null, total: { $sum: '$amount' } } },
         ]),
+        Contribution.distinct('residentId', { eventId: event._id, paymentStatus: { $in: ['Paid', 'Partial'] } }),
         Contribution.countDocuments({ eventId: event._id }),
         Expense.countDocuments({ eventId: event._id, status: 'Approved' }),
         Expense.countDocuments({ eventId: event._id, status: 'Pending' }),
@@ -103,6 +102,8 @@ const getEventDashboard = async (req, res, next) => {
       ? Math.min(Math.round((totalCollection / event.targetBudget) * 100), 100)
       : 0;
 
+    const paidPersonsCount = paidResidents.length;
+
     res.json({
       success: true,
       data: {
@@ -111,7 +112,9 @@ const getEventDashboard = async (req, res, next) => {
         totalExpenses,
         netBalance,
         budgetProgress,
-        contributorsCount,
+        paidPersonsCount,
+        contributorsCount: paidPersonsCount || totalContributionsCount,
+        totalContributionsCount,
         expensesCount,
         pendingExpensesCount,
       },
@@ -124,14 +127,14 @@ const getEventDashboard = async (req, res, next) => {
 // ─── PATCH /api/events/:id (Admin only) ──────────────────────────────────────
 const updateEvent = async (req, res, next) => {
   try {
-    const allowed = ['title', 'description', 'targetBudget', 'perHouseAmount', 'startDate', 'endDate', 'isActive'];
+    const allowed = ['title', 'description', 'targetBudget', 'perHouseAmount', 'startDate', 'endDate', 'isActive', 'excludedResidents'];
     const updates = {};
     allowed.forEach((k) => { if (req.body[k] !== undefined) updates[k] = req.body[k]; });
 
     const event = await Event.findByIdAndUpdate(req.params.id, updates, {
       new:           true,
       runValidators: true,
-    });
+    }).populate('excludedResidents', 'name houseOrFlatNo phone');
     if (!event) return res.status(404).json({ success: false, message: 'Event not found.' });
     res.json({ success: true, data: event });
   } catch (err) {

@@ -61,6 +61,12 @@ const eventSchema = new mongoose.Schema(
       ref:      'Resident',
       required: true,
     },
+    excludedResidents: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref:  'Resident',
+      },
+    ],
   },
   { timestamps: true }
 );
