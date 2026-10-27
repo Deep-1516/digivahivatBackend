@@ -15,6 +15,8 @@ const eventRoutes        = require('./routes/event.routes');
 const contributionRoutes = require('./routes/contribution.routes');
 const expenseRoutes      = require('./routes/expense.routes');
 const societyRoutes      = require('./routes/society.routes');
+const noticeRoutes       = require('./routes/notice.routes');
+const complaintRoutes    = require('./routes/complaint.routes');
 const { errorHandler }   = require('./middlewares/error.middleware');
 
 const app = express();
@@ -66,6 +68,8 @@ app.use('/api/residents',     residentRoutes);
 app.use('/api/events',        eventRoutes);
 app.use('/api/contributions', contributionRoutes);
 app.use('/api/expenses',      expenseRoutes);
+app.use('/api/notices',       noticeRoutes);
+app.use('/api/complaints',    complaintRoutes);
 
 // ─── Health Check ─────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'Falo API' }));

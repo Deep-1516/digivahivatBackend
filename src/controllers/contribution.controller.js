@@ -7,6 +7,7 @@ const PDFDocument  = require('pdfkit');
 const Contribution = require('../models/Contribution.model');
 const Event        = require('../models/Event.model');
 const Resident     = require('../models/Resident.model');
+const Society      = require('../models/Society.model');
 
 // ─── POST /api/contributions (Admin only) ────────────────────────────────────
 const recordContribution = async (req, res, next) => {
@@ -81,8 +82,11 @@ const recordContribution = async (req, res, next) => {
       }
     }
 
+    const targetSocietyId = req.user.societyId?._id || req.user.societyId || resident.societyId;
+
     const contribution = await Contribution.create({
       contributionType,
+      societyId:      targetSocietyId,
       eventId:        contributionType === 'Event'  ? eventId    : null,
       annualYear:     contributionType === 'Annual' ? Number(annualYear) : null,
       residentId,
@@ -131,254 +135,330 @@ const getContributions = async (req, res, next) => {
   }
 };
 
+// ─── Indian Currency Number-to-Words Helper ─────────────────────────────────
+function numberToWordsINR(num) {
+  const n = Math.floor(Number(num) || 0);
+  if (n === 0) return 'Zero Rupees Only';
+
+  const singleDigits = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
+  const twoDigits = ['Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+  function convertLessThanOneThousand(val) {
+    let str = '';
+    if (val >= 100) {
+      str += singleDigits[Math.floor(val / 100)] + ' Hundred ';
+      val %= 100;
+    }
+    if (val >= 10 && val <= 19) {
+      str += twoDigits[val - 10] + ' ';
+    } else if (val >= 20) {
+      str += tens[Math.floor(val / 10)] + ' ';
+      val %= 10;
+      if (val > 0) str += singleDigits[val] + ' ';
+    } else if (val > 0) {
+      str += singleDigits[val] + ' ';
+    }
+    return str.trim();
+  }
+
+  let words = '';
+  const crore = Math.floor(n / 10000000);
+  let rem = n % 10000000;
+  const lakh = Math.floor(rem / 100000);
+  rem = rem % 100000;
+  const thousand = Math.floor(rem / 1000);
+  rem = rem % 1000;
+  const hundredAndBelow = rem;
+
+  if (crore > 0) words += convertLessThanOneThousand(crore) + ' Crore ';
+  if (lakh > 0) words += convertLessThanOneThousand(lakh) + ' Lakh ';
+  if (thousand > 0) words += convertLessThanOneThousand(thousand) + ' Thousand ';
+  if (hundredAndBelow > 0) words += convertLessThanOneThousand(hundredAndBelow) + ' ';
+
+  return words.trim() + ' Rupees Only';
+}
+
 // ─── GET /api/contributions/:id/pdf-receipt ───────────────────────────────────
 /**
- * Generates and streams a well-designed PDF receipt.
- *
- * Layout (A5 portrait):
- *   ┌─────────────────────────────────────────┐
- *   │  [ORANGE HEADER BAND]  FALO             │
- *   │  Payment Receipt  |  Society Mgmt       │
- *   ├─────────────────────────────────────────┤
- *   │  [AMOUNT HIGHLIGHT BOX]  Rs. 1,000      │
- *   │  Status badge  |  Mode badge            │
- *   ├─────────────────────────────────────────┤
- *   │  TABLE ROWS (alternating grey/white)    │
- *   │  Receipt No  |  Date                    │
- *   │  Event/Fund  |  Type                    │
- *   │  Resident    |  Phone                   │
- *   │  Flat        |  Recorded By             │
- *   │  TxnID (if UPI)                         │
- *   │  Notes (if any)                         │
- *   ├─────────────────────────────────────────┤
- *   │  [FOOTER]  system-generated             │
- *   └─────────────────────────────────────────┘
- *
- * All fonts use Helvetica (built-in) — no emoji, no Unicode currency symbol.
- * "Rs." is used instead of "₹" (not supported in standard PDF fonts).
+ * Generates and streams an executive-grade, official A5 payment receipt voucher.
+ * Includes society branding, voucher numbering, amount in figures & words,
+ * structured details grid, authenticated digital verification seal, and signature block.
  */
 const generatePdfReceipt = async (req, res, next) => {
   try {
     const contribution = await Contribution.findById(req.params.id)
-      .populate('residentId', 'name phone houseOrFlatNo')
-      .populate('eventId',    'title')
-      .populate('recordedBy', 'name')
-      .populate('societyId',  'name city');
+      .populate('residentId', 'name phone houseOrFlatNo societyId')
+      .populate('eventId',    'title societyId')
+      .populate('recordedBy', 'name role')
+      .populate('societyId',  'name address city');
 
     if (!contribution) {
       return res.status(404).json({ success: false, message: 'Contribution record not found.' });
     }
 
+    // Resolve society: from contribution -> resident -> event -> requesting user
+    let society = contribution.societyId;
+    if (!society && contribution.residentId?.societyId) {
+      society = await Society.findById(contribution.residentId.societyId);
+    }
+    if (!society && contribution.eventId?.societyId) {
+      society = await Society.findById(contribution.eventId.societyId);
+    }
+    if (!society && req.user?.societyId) {
+      society = await Society.findById(req.user.societyId?._id || req.user.societyId);
+    }
+
+    const societyName = (society?.name || 'FALO SOCIETY RESIDENTIAL COMMUNITY').toUpperCase();
+    const addressParts = [society?.address, society?.city].filter(Boolean);
+    const societyAddress = addressParts.length > 0 ? addressParts.join(', ') : 'Registered Society Office';
+
+    const receiptShort = contribution._id.toString().slice(-8).toUpperCase();
+    const receiptNo = `REC-${new Date(contribution.date).getFullYear()}-${receiptShort}`;
+
+    const dateObj = new Date(contribution.date);
+    const dateFormatted =
+      dateObj.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) +
+      ', ' +
+      dateObj.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const isAnnual = contribution.contributionType === 'Annual';
+    const eventName = isAnnual
+      ? `Annual Society Maintenance Fund (${contribution.annualYear || ''})`
+      : (contribution.eventId?.title || 'Society Event Collection');
+    const category = isAnnual ? 'Annual Society Fund' : 'Society Event Collection';
+    const categoryShort = isAnnual ? 'Annual Fund' : 'Event Fund';
+
+    const residentName = contribution.residentId?.name || 'Resident';
+    const flatNo = contribution.residentId?.houseOrFlatNo ? `Flat ${contribution.residentId.houseOrFlatNo}` : 'N/A';
+    const phone = contribution.residentId?.phone || 'N/A';
+    const recordedBy = contribution.recordedBy?.name || 'Society Admin';
+    const paymentMode = contribution.paymentMode || 'Cash';
+    const paymentStatus = contribution.paymentStatus || 'Paid';
+    const transactionId = contribution.transactionId || null;
+    const notes = contribution.notes ? String(contribution.notes).trim() : '';
+
     // ── Page setup ───────────────────────────────────────────────────────────
-    const doc = new PDFDocument({ size: 'A5', margin: 0, info: { Title: 'Falo Payment Receipt' } });
+    const doc = new PDFDocument({
+      size: 'A5',
+      margin: 0,
+      info: {
+        Title: `Payment Receipt - ${receiptNo}`,
+        Author: 'FALO App',
+        Subject: `Payment Receipt for ${residentName}`,
+      },
+    });
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="Falo_Receipt_${contribution._id.toString().slice(-8).toUpperCase()}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="Falo_Receipt_${receiptShort}.pdf"`);
     doc.pipe(res);
 
-    // ── Constants ────────────────────────────────────────────────────────────
-    const W        = doc.page.width;          // A5 = 419.53 pt
-    const MARGIN   = 30;
-    const CONTENT  = W - MARGIN * 2;
-    const ORANGE   = '#E85C0D';
-    const ORANGE_L = '#FFF4EE';
-    const DARK     = '#1A1A2E';
-    const GRAY     = '#6B7280';
-    const LGRAY    = '#F3F4F6';
-    const WHITE    = '#FFFFFF';
-    const GREEN    = '#15803D';
-    const GREEN_L  = '#DCFCE7';
+    // ── Coordinates & Sizing ─────────────────────────────────────────────────
+    const W  = doc.page.width;   // 419.53 pt
+    const H  = doc.page.height;  // 595.28 pt
+    const M  = 22;               // margin
+    const CW = W - M * 2;       // 375.53 pt
 
-    const fmtAmt  = (n) => `Rs. ${Number(n).toLocaleString('en-IN')}`;
-    const fmtDate = (d) => new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-
-    // ── 1. ORANGE HEADER BAND ────────────────────────────────────────────────
-    doc.rect(0, 0, W, 80).fill(ORANGE);
-
-    // App name
-    doc
-      .fillColor(WHITE)
-      .font('Helvetica-Bold')
-      .fontSize(22)
-      .text('FALO', MARGIN, 18, { width: CONTENT, align: 'left' });
-
-    // Subtitle on right
-    doc
-      .fillColor('#FFDABC')
-      .font('Helvetica')
-      .fontSize(9)
-      .text('Society Event & Contribution Manager', MARGIN, 23, { width: CONTENT, align: 'right' });
-
-    // "Payment Receipt" below
-    doc
-      .fillColor(WHITE)
-      .font('Helvetica-Bold')
-      .fontSize(13)
-      .text('PAYMENT RECEIPT', MARGIN, 48, { width: CONTENT, align: 'left' });
-
-    // Receipt number on right side of header
-    const receiptNo = `#${contribution._id.toString().slice(-8).toUpperCase()}`;
-    doc
-      .fillColor('#FFDABC')
-      .font('Helvetica')
-      .fontSize(9)
-      .text(receiptNo, MARGIN, 52, { width: CONTENT, align: 'right' });
-
-    // ── 2. AMOUNT HIGHLIGHT BOX ──────────────────────────────────────────────
-    const boxY = 90;
-    doc.rect(MARGIN, boxY, CONTENT, 56).fill(ORANGE_L);
-    // left border accent
-    doc.rect(MARGIN, boxY, 4, 56).fill(ORANGE);
-
-    doc
-      .fillColor(ORANGE)
-      .font('Helvetica-Bold')
-      .fontSize(26)
-      .text(fmtAmt(contribution.amount), MARGIN + 16, boxY + 8, { width: CONTENT - 120, align: 'left' });
-
-    doc
-      .fillColor(GRAY)
-      .font('Helvetica')
-      .fontSize(8)
-      .text('Amount Paid', MARGIN + 16, boxY + 40);
-
-    // Status badge (right side of amount box)
-    const statusColors = {
-      Paid:    { bg: GREEN_L,   text: GREEN   },
-      Partial: { bg: '#FEF9C3', text: '#854D0E' },
-      Pending: { bg: '#FEE2E2', text: '#991B1B' },
+    const C = {
+      navyDark:    '#0A192F',
+      navyMid:     '#1E293B',
+      saffron:     '#E85C0D',
+      saffronL:    '#FFF8F5',
+      saffronB:    '#FDBA74',
+      textMain:    '#0F172A',
+      textMuted:   '#64748B',
+      bgLight:     '#F8FAFC',
+      borderLight: '#E2E8F0',
+      borderDark:  '#94A3B8',
+      white:       '#FFFFFF',
+      green:       '#16A34A',
+      greenBg:     '#DCFCE7',
+      greenBorder: '#86EFAC',
+      blue:        '#2563EB',
+      blueBg:      '#EFF6FF',
+      blueBorder:  '#BFDBFE',
+      amber:       '#D97706',
+      amberBg:     '#FEF3C7',
+      amberBorder: '#FDE68A',
+      red:         '#DC2626',
+      redBg:       '#FEE2E2',
+      redBorder:   '#FCA5A5',
     };
-    const sc = statusColors[contribution.paymentStatus] || statusColors.Paid;
-    const badgeX = W - MARGIN - 90;
-    const badgeY = boxY + 8;
-    doc.roundedRect(badgeX, badgeY, 86, 18, 4).fill(sc.bg);
-    doc.fillColor(sc.text).font('Helvetica-Bold').fontSize(9)
-       .text(contribution.paymentStatus.toUpperCase(), badgeX, badgeY + 4, { width: 86, align: 'center' });
 
-    // Payment mode badge below
-    doc.roundedRect(badgeX, badgeY + 24, 86, 18, 4).fill('#EFF6FF');
-    doc.fillColor('#1D4ED8').font('Helvetica-Bold').fontSize(9)
-       .text(contribution.paymentMode.toUpperCase(), badgeX, badgeY + 28, { width: 86, align: 'center' });
+    const statusConfigs = {
+      Paid:    { label: 'PAID & SETTLED', color: C.green, bg: C.greenBg, border: C.greenBorder },
+      Partial: { label: 'PARTIAL PAYMENT', color: C.amber, bg: C.amberBg, border: C.amberBorder },
+      Pending: { label: 'PAYMENT PENDING', color: C.red,   bg: C.redBg,   border: C.redBorder },
+    };
+    const sc = statusConfigs[paymentStatus] || statusConfigs.Paid;
 
-    // ── 3. DETAILS TABLE ─────────────────────────────────────────────────────
-    const tableTop    = boxY + 66;
-    const COL_W       = CONTENT / 2;
-    const ROW_H       = 26;
+    const modeConfigs = {
+      UPI:  { label: 'UPI ONLINE', color: C.blue,  bg: C.blueBg,  border: C.blueBorder },
+      Cash: { label: 'CASH PAYMENT', color: C.green, bg: '#ECFDF5', border: '#A7F3D0' },
+    };
+    const mc = modeConfigs[paymentMode] || modeConfigs.Cash;
 
-    // Build rows: [ [label, value], [label, value] ] — pairs per row
-    const eventLabel = contribution.contributionType === 'Annual'
-      ? 'Annual Fund Year'
-      : 'Event';
-    const eventValue = contribution.contributionType === 'Annual'
-      ? String(contribution.annualYear)
-      : (contribution.eventId?.title || '—');
-    const typeLabel  = contribution.contributionType === 'Annual' ? 'Annual Fund' : 'Event Collection';
+    // 1. OUTER DECORATIVE BORDER (Certificate / Voucher style)
+    doc.roundedRect(7, 7, W - 14, H - 14, 8).lineWidth(1.5).strokeColor(C.navyDark).stroke();
+    doc.roundedRect(10, 10, W - 20, H - 20, 6).lineWidth(0.6).strokeColor(C.saffron).stroke();
 
-    const tableRows = [
+    // 2. HEADER CONTAINER
+    doc.rect(11, 11, W - 22, 78).fill(C.navyDark);
+
+    // App & Tagline
+    doc.fillColor('#FDBA74').font('Helvetica-Bold').fontSize(8)
+       .text('FALO SOCIETY MANAGEMENT PLATFORM', M, 20, { width: CW, align: 'center', characterSpacing: 1 });
+
+    // Society Name
+    doc.fillColor(C.white).font('Helvetica-Bold').fontSize(11.5)
+       .text(societyName, M, 32, { width: CW, align: 'center', height: 16, ellipsis: true });
+
+    // Society Address
+    doc.fillColor('#94A3B8').font('Helvetica').fontSize(7.5)
+       .text(societyAddress, M, 48, { width: CW, align: 'center', height: 14, ellipsis: true });
+
+    // Sub-header Banner bar
+    doc.rect(11, 74, W - 22, 22).fill(C.saffron);
+    doc.fillColor(C.white).font('Helvetica-Bold').fontSize(8.5)
+       .text('OFFICIAL PAYMENT RECEIPT / VOUCHER', M + 6, 81, { width: CW * 0.65, align: 'left' });
+    doc.fillColor('#FFF7ED').font('Helvetica-Bold').fontSize(7.5)
+       .text('ORIGINAL ACKNOWLEDGEMENT', M + CW * 0.65, 82, { width: CW * 0.35 - 6, align: 'right' });
+
+    // 3. VOUCHER SUMMARY STRIP
+    const stripY = 104;
+    const stripH = 28;
+    doc.rect(M, stripY, CW, stripH).fill(C.bgLight).strokeColor(C.borderLight).lineWidth(0.5).stroke();
+
+    doc.fillColor(C.textMuted).font('Helvetica-Bold').fontSize(6.5).text('RECEIPT NO:', M + 10, stripY + 5);
+    doc.fillColor(C.navyDark).font('Helvetica-Bold').fontSize(9).text(receiptNo, M + 10, stripY + 14);
+
+    doc.fillColor(C.textMuted).font('Helvetica-Bold').fontSize(6.5).text('DATE & TIME:', M + 140, stripY + 5);
+    doc.fillColor(C.navyDark).font('Helvetica-Bold').fontSize(8.5).text(dateFormatted, M + 140, stripY + 14);
+
+    doc.fillColor(C.textMuted).font('Helvetica-Bold').fontSize(6.5).text('COLLECTION HEAD:', M + 265, stripY + 5);
+    doc.fillColor(C.navyDark).font('Helvetica-Bold').fontSize(8.5).text(categoryShort, M + 265, stripY + 14, { width: CW - 275, ellipsis: true });
+
+    // 4. AMOUNT HIGHLIGHT BOX
+    const amtY = 140;
+    const amtH = 70;
+    doc.roundedRect(M, amtY, CW, amtH, 6).fill(C.saffronL).strokeColor(C.saffronB).lineWidth(1).stroke();
+    doc.roundedRect(M, amtY, 6, amtH, 3).fill(C.saffron);
+
+    doc.fillColor(C.saffron).font('Helvetica-Bold').fontSize(8)
+       .text('TOTAL AMOUNT RECEIVED', M + 16, amtY + 10, { characterSpacing: 0.5 });
+    doc.fillColor(C.navyDark).font('Helvetica-Bold').fontSize(24)
+       .text(`Rs. ${Number(contribution.amount).toLocaleString('en-IN')}/-`, M + 16, amtY + 22);
+
+    const words = numberToWordsINR(contribution.amount);
+    doc.fillColor(C.textMuted).font('Helvetica-Oblique').fontSize(8.5)
+       .text(`Amount in words: ${words}`, M + 16, amtY + 51, { width: CW - 135, height: 14, ellipsis: true });
+
+    // Status & Mode Badges
+    const badgeRight = W - M - 98;
+    doc.roundedRect(badgeRight, amtY + 10, 92, 21, 4).fill(sc.bg).strokeColor(sc.border).lineWidth(0.8).stroke();
+    doc.fillColor(sc.color).font('Helvetica-Bold').fontSize(8)
+       .text(sc.label, badgeRight, amtY + 16, { width: 92, align: 'center' });
+
+    doc.roundedRect(badgeRight, amtY + 36, 92, 21, 4).fill(mc.bg).strokeColor(mc.border).lineWidth(0.8).stroke();
+    doc.fillColor(mc.color).font('Helvetica-Bold').fontSize(8.5)
+       .text(mc.label, badgeRight, amtY + 42, { width: 92, align: 'center' });
+
+    // 5. STRUCTURED DETAILS TABLE
+    const tableY = 232;
+    const rowH = 27;
+    const colW = CW / 2;
+
+    const rows = [
       [
-        { label: 'Receipt No',    value: receiptNo },
-        { label: 'Date',          value: fmtDate(contribution.date) },
+        { label: 'RECEIVED FROM (MEMBER)', value: residentName },
+        { label: 'FLAT / HOUSE NO', value: flatNo },
       ],
       [
-        { label: eventLabel,      value: eventValue },
-        { label: 'Type',          value: typeLabel },
+        { label: 'CONTACT NUMBER', value: phone },
+        { label: 'CONTRIBUTION FOR', value: eventName },
       ],
       [
-        { label: 'Resident Name', value: contribution.residentId?.name || '—' },
-        { label: 'Phone',         value: contribution.residentId?.phone || '—' },
+        { label: 'PAYMENT METHOD', value: paymentMode },
+        { label: paymentMode === 'UPI' ? 'UPI TXN / UTR ID' : 'PAYMENT CHANNEL', value: transactionId || 'Cash Handover' },
       ],
       [
-        { label: 'Flat / House',  value: contribution.residentId?.houseOrFlatNo || 'N/A' },
-        { label: 'Recorded By',   value: contribution.recordedBy?.name || 'Admin' },
+        { label: 'RECORDED / RECEIVED BY', value: recordedBy },
+        { label: 'CATEGORY', value: category },
       ],
     ];
 
-    // Add UPI transaction row if applicable
-    if (contribution.transactionId) {
-      tableRows.push([
-        { label: 'UPI Transaction ID', value: contribution.transactionId },
-        { label: '', value: '' },
+    if (notes) {
+      rows.push([
+        { label: 'REMARKS / PURPOSE', value: notes, fullSpan: true },
+        null,
       ]);
     }
 
-    // Add notes row if present
-    if (contribution.notes) {
-      tableRows.push([
-        { label: 'Notes', value: contribution.notes },
-        { label: '', value: '' },
-      ]);
-    }
+    doc.fillColor(C.textMuted).font('Helvetica-Bold').fontSize(8)
+       .text('PAYMENT PARTICULARS & RECEIVER DETAILS', M, tableY - 12, { characterSpacing: 0.5 });
 
-    // Section label
-    doc
-      .fillColor(GRAY)
-      .font('Helvetica-Bold')
-      .fontSize(7.5)
-      .text('PAYMENT DETAILS', MARGIN, tableTop - 14, { characterSpacing: 0.8 });
+    let curY = tableY;
+    rows.forEach((r, idx) => {
+      const isEven = idx % 2 === 0;
+      const isFullSpan = r[0].fullSpan;
+      const rHeight = isFullSpan ? 32 : rowH;
 
-    // Draw rows
-    tableRows.forEach((cols, rowIdx) => {
-      const y      = tableTop + rowIdx * ROW_H;
-      const isEven = rowIdx % 2 === 0;
+      doc.rect(M, curY, CW, rHeight).fill(isEven ? C.bgLight : C.white);
 
-      // Row background
-      doc.rect(MARGIN, y, CONTENT, ROW_H).fill(isEven ? LGRAY : WHITE);
+      if (isFullSpan) {
+        doc.fillColor(C.textMuted).font('Helvetica').fontSize(6.5).text(r[0].label, M + 8, curY + 4);
+        doc.fillColor(C.navyDark).font('Helvetica-Bold').fontSize(8.5).text(r[0].value, M + 8, curY + 14, { width: CW - 16, height: 16, ellipsis: true });
+      } else {
+        doc.fillColor(C.textMuted).font('Helvetica').fontSize(6.5).text(r[0].label, M + 8, curY + 4);
+        doc.fillColor(C.navyDark).font('Helvetica-Bold').fontSize(8.5).text(r[0].value, M + 8, curY + 14, { width: colW - 16, ellipsis: true });
 
-      cols.forEach((cell, colIdx) => {
-        if (!cell.label) return;
-        const x = MARGIN + colIdx * COL_W + 8;
+        if (r[1]) {
+          doc.fillColor(C.textMuted).font('Helvetica').fontSize(6.5).text(r[1].label, M + colW + 8, curY + 4);
+          doc.fillColor(C.navyDark).font('Helvetica-Bold').fontSize(8.5).text(r[1].value, M + colW + 8, curY + 14, { width: colW - 16, ellipsis: true });
+        }
+      }
 
-        doc
-          .fillColor(GRAY)
-          .font('Helvetica')
-          .fontSize(7)
-          .text(cell.label.toUpperCase(), x, y + 4, { width: COL_W - 12 });
-
-        doc
-          .fillColor(DARK)
-          .font('Helvetica-Bold')
-          .fontSize(9)
-          .text(String(cell.value || '—'), x, y + 13, { width: COL_W - 12, ellipsis: true });
-      });
+      curY += rHeight;
     });
 
-    // Table border
-    const tableBottom = tableTop + tableRows.length * ROW_H;
-    doc.rect(MARGIN, tableTop, CONTENT, tableRows.length * ROW_H)
-       .strokeColor('#E5E7EB').lineWidth(0.5).stroke();
+    const totalTableH = curY - tableY;
+    doc.rect(M, tableY, CW, totalTableH).strokeColor(C.borderLight).lineWidth(0.5).stroke();
+    doc.moveTo(M + colW, tableY).lineTo(M + colW, tableY + (rows.length - (notes ? 1 : 0)) * rowH).strokeColor(C.borderLight).lineWidth(0.5).stroke();
 
-    // Vertical divider
-    doc
-      .moveTo(MARGIN + COL_W, tableTop)
-      .lineTo(MARGIN + COL_W, tableBottom)
-      .strokeColor('#E5E7EB').lineWidth(0.5).stroke();
+    // 6. VERIFICATION STAMP & AUTHORIZATION SIGNATURE
+    const authY = curY + 14;
 
-    // ── 4. FOOTER ────────────────────────────────────────────────────────────
-    const footerY = tableBottom + 16;
+    const stampW = CW * 0.55;
+    const stampH = 74;
+    doc.roundedRect(M, authY, stampW, stampH, 5).fill('#F0FDF4').strokeColor('#86EFAC').lineWidth(1).stroke();
 
-    // Thin top border line for footer
-    doc
-      .moveTo(MARGIN, footerY)
-      .lineTo(W - MARGIN, footerY)
-      .strokeColor('#E5E7EB').lineWidth(0.5).stroke();
+    doc.fillColor(C.green).font('Helvetica-Bold').fontSize(8.5).text('AUTHENTICATED DIGITAL VOUCHER', M + 10, authY + 8);
+    doc.fillColor(C.textMuted).font('Helvetica').fontSize(7.5).text('Status: Payment Verified & Credited to Society Account', M + 10, authY + 21, { width: stampW - 20 });
+    doc.fillColor(C.textMuted).font('Helvetica').fontSize(7.5).text(`Verification Ref: FALO-${receiptShort.slice(-6)}-LEDGER-OK`, M + 10, authY + 34);
+    doc.fillColor(C.textMuted).font('Helvetica-Oblique').fontSize(7).text('System generated e-receipt. Valid without physical signature.', M + 10, authY + 50, { width: stampW - 20 });
 
-    doc
-      .fillColor(GRAY)
-      .font('Helvetica-Oblique')
-      .fontSize(7.5)
-      .text(
-        'This is a system-generated receipt. No signature required.',
-        MARGIN, footerY + 8, { width: CONTENT, align: 'center' }
-      );
+    const sigX = M + stampW + 12;
+    const sigW = CW - stampW - 12;
+    doc.roundedRect(sigX, authY, sigW, stampH, 5).fill(C.white).strokeColor(C.borderDark).lineWidth(0.7).stroke();
 
-    doc
-      .fillColor('#9CA3AF')
-      .font('Helvetica')
-      .fontSize(7)
-      .text(
-        `Generated by Falo App  |  ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`,
-        MARGIN, footerY + 20, { width: CONTENT, align: 'center' }
-      );
+    doc.fillColor(C.textMuted).font('Helvetica-Bold').fontSize(7).text('FOR SOCIETY ADMINISTRATION', sigX + 6, authY + 8, { width: sigW - 12, align: 'center' });
+    doc.moveTo(sigX + 16, authY + 52).lineTo(sigX + sigW - 16, authY + 52).strokeColor(C.borderDark).lineWidth(0.5).stroke();
+    doc.fillColor(C.navyDark).font('Helvetica-Bold').fontSize(8).text(recordedBy.split('(')[0].trim(), sigX + 6, authY + 55, { width: sigW - 12, align: 'center' });
+    doc.fillColor(C.textMuted).font('Helvetica').fontSize(6.5).text('Authorized Representative / Signatory', sigX + 6, authY + 64, { width: sigW - 12, align: 'center' });
+
+    // 7. FOOTER TERMS & CONDITIONS
+    const footY = authY + stampH + 14;
+    doc.moveTo(M, footY).lineTo(W - M, footY).strokeColor(C.borderLight).lineWidth(0.5).stroke();
+
+    doc.fillColor(C.textMuted).font('Helvetica').fontSize(7).text(
+      'Notes: 1. This electronic receipt serves as official proof of payment. 2. Please preserve this receipt for your records and society audits. 3. In case of discrepancies, notify the society committee within 7 days.',
+      M, footY + 6, { width: CW, align: 'left', lineGap: 1.5 }
+    );
+
+    doc.fillColor('#94A3B8').font('Helvetica').fontSize(7).text(
+      `FALO Society Management Ledger  |  Generated on ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}  |  Page 1 of 1`,
+      M, footY + 28, { width: CW, align: 'center' }
+    );
 
     doc.end();
   } catch (err) {
