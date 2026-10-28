@@ -16,11 +16,15 @@ const {
   getMyProfile,
   updateResident,
   deleteResident,
+  saveFcmToken,
+  removeFcmToken,
 } = require('../controllers/resident.controller');
 
-router.get('/me',    protect,              getMyProfile);
-router.get('/',      protect,              getAllResidents);
-router.post('/',     protect, adminOnly,   validateAddResident, addResident);
+router.get('/me',            protect,              getMyProfile);
+router.get('/',              protect,              getAllResidents);
+router.post('/fcm-token',    protect,              saveFcmToken);
+router.delete('/fcm-token',  protect,              removeFcmToken);
+router.post('/',             protect, adminOnly,   validateAddResident, addResident);
 router.patch('/:id', protect, adminOnly,   updateResident);
 router.delete('/:id',protect, adminOnly,   deleteResident);
 

@@ -6,6 +6,7 @@
  */
 const EmergencyAlert = require('../models/EmergencyAlert.model');
 const Resident       = require('../models/Resident.model');
+const { sendSosNotification } = require('../config/firebase');
 
 // ─── POST /api/sos (Trigger SOS) ─────────────────────────────────────────────
 const triggerAlert = async (req, res, next) => {
@@ -53,6 +54,39 @@ const triggerAlert = async (req, res, next) => {
     await alert.populate([
       { path: 'residentId', select: 'name phone houseOrFlatNo' },
     ]);
+
+    // Asynchronous Push Notification broadcast to all society members & admins
+    (async () => {
+      try {
+        const recipients = await Resident.find({
+          societyId,
+          _id: { $ne: resident._id },
+          fcmTokens: { $exists: true, $ne: [] },
+        }).select('fcmTokens');
+
+        const allTokens = [...new Set(recipients.flatMap((r) => r.fcmTokens || []).filter(Boolean))];
+        if (allTokens.length > 0) {
+          const pushResult = await sendSosNotification({
+            tokens: allTokens,
+            senderName: resident.name,
+            flatNo,
+            emergencyType: type,
+            description: description.trim(),
+            alertId: alert._id,
+          });
+
+          // Clean up invalid or uninstalled tokens automatically
+          if (pushResult?.deadTokens?.length) {
+            await Resident.updateMany(
+              { fcmTokens: { $in: pushResult.deadTokens } },
+              { $pull: { fcmTokens: { $in: pushResult.deadTokens } } }
+            );
+          }
+        }
+      } catch (pushErr) {
+        console.error('⚠️ [SOS Broadcast] Push notification error:', pushErr.message);
+      }
+    })();
 
     res.status(201).json({
       success: true,

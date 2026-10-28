@@ -58,6 +58,10 @@ const residentSchema = new mongoose.Schema(
       default: null,
       index:   true,
     },
+    fcmTokens: {
+      type:    [String],
+      default: [],
+    },
   },
   { timestamps: true }
 );

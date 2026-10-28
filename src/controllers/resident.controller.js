@@ -181,4 +181,46 @@ const deleteResident = async (req, res, next) => {
   }
 };
 
-module.exports = { addResident, getAllResidents, getMyProfile, updateResident, deleteResident };
+// ─── POST /api/residents/fcm-token (Authenticated) ──────────────────────────
+const saveFcmToken = async (req, res, next) => {
+  try {
+    const { fcmToken } = req.body;
+    if (!fcmToken || typeof fcmToken !== 'string') {
+      return res.status(400).json({ success: false, message: 'Valid fcmToken is required.' });
+    }
+
+    await Resident.findByIdAndUpdate(req.user._id, {
+      $addToSet: { fcmTokens: fcmToken.trim() },
+    });
+
+    res.json({ success: true, message: 'FCM push token registered successfully.' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── DELETE /api/residents/fcm-token (Authenticated) ────────────────────────
+const removeFcmToken = async (req, res, next) => {
+  try {
+    const { fcmToken } = req.body;
+    if (fcmToken) {
+      await Resident.findByIdAndUpdate(req.user._id, {
+        $pull: { fcmTokens: fcmToken.trim() },
+      });
+    }
+
+    res.json({ success: true, message: 'FCM push token deregistered.' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = {
+  addResident,
+  getAllResidents,
+  getMyProfile,
+  updateResident,
+  deleteResident,
+  saveFcmToken,
+  removeFcmToken,
+};
