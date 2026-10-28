@@ -366,3 +366,261 @@ exports.cancelPreApproval = async (req, res, next) => {
     next(err);
   }
 };
+
+// ─── GET /api/visitors/pass/:id (Public Web Pass for WhatsApp / SMS) ─────────
+exports.getPublicGatePass = async (req, res, next) => {
+  try {
+    const mongoose = require('mongoose');
+    const isId = mongoose.Types.ObjectId.isValid(req.params.id);
+
+    const query = isId
+      ? { $or: [{ _id: req.params.id }, { qrToken: req.params.id }] }
+      : { qrToken: req.params.id };
+
+    const visitor = await Visitor.findOne(query)
+      .populate('residentId', 'name phone houseOrFlatNo')
+      .populate('societyId', 'name address city');
+
+    if (!visitor) {
+      return res.status(404).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Invalid Gate Pass</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0F172A; color: #FFF; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+            .card { background: #1E293B; border-radius: 20px; padding: 32px; text-align: center; max-width: 380px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); }
+            h2 { color: #EF4444; margin: 0 0 10px; }
+            p { color: #94A3B8; font-size: 14px; margin: 0; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h2>⚠️ Invalid Pass</h2>
+            <p>This gate pass does not exist or has expired. Please contact your host resident.</p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    const societyName = (visitor.societyId?.name || 'Society Gate Pass').toUpperCase();
+    const flatNo = visitor.flatNo || visitor.residentId?.houseOrFlatNo || 'Resident';
+    const hostName = visitor.residentId?.name || 'Resident Host';
+    const validUntilStr = new Date(visitor.validUntil).toLocaleDateString('en-IN', {
+      day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true
+    });
+
+    const isExpired = new Date() > new Date(visitor.validUntil);
+    const isInside = visitor.status === 'Inside';
+    const isUsed = visitor.status === 'Completed';
+    const isCancelled = visitor.status === 'Cancelled';
+
+    let statusBadgeColor = '#10B981';
+    let statusLabel = 'VALID GATE PASS';
+    if (isExpired) {
+      statusBadgeColor = '#EF4444';
+      statusLabel = 'PASS EXPIRED';
+    } else if (isInside) {
+      statusBadgeColor = '#3B82F6';
+      statusLabel = 'CURRENTLY INSIDE';
+    } else if (isUsed) {
+      statusBadgeColor = '#6B7280';
+      statusLabel = 'PASS COMPLETED';
+    } else if (isCancelled) {
+      statusBadgeColor = '#EF4444';
+      statusLabel = 'PASS CANCELLED';
+    }
+
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>Gate Pass - ${visitor.visitorName}</title>
+        <style>
+          * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: #0B0F19;
+            color: #0F172A;
+            margin: 0;
+            padding: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+          }
+          .pass-card {
+            background: #FFFFFF;
+            border-radius: 24px;
+            max-width: 390px;
+            width: 100%;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+            border: 2px solid #E2E8F0;
+          }
+          .header {
+            background: linear-gradient(135deg, #4F46E5, #3730A3);
+            color: #FFFFFF;
+            padding: 24px 20px;
+            text-align: center;
+          }
+          .society-name {
+            font-size: 15px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            margin: 0 0 4px;
+          }
+          .pass-sub {
+            font-size: 11px;
+            color: #C7D2FE;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin: 0;
+          }
+          .status-badge {
+            display: inline-block;
+            background: ${statusBadgeColor};
+            color: #FFFFFF;
+            font-size: 11px;
+            font-weight: 800;
+            padding: 4px 12px;
+            border-radius: 9999px;
+            margin-top: 10px;
+            letter-spacing: 0.5px;
+          }
+          .qr-wrapper {
+            padding: 24px 20px 16px;
+            text-align: center;
+            background: #F8FAFC;
+            border-bottom: 2px dashed #CBD5E1;
+            position: relative;
+          }
+          .qr-img {
+            width: 220px;
+            height: 220px;
+            background: #FFFFFF;
+            padding: 10px;
+            border-radius: 16px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            border: 1px solid #E2E8F0;
+          }
+          .passcode-box {
+            margin-top: 14px;
+            background: #FFFFFF;
+            border: 2px solid #4F46E5;
+            border-radius: 12px;
+            padding: 8px 16px;
+            display: inline-block;
+          }
+          .passcode-label {
+            font-size: 10px;
+            font-weight: 700;
+            color: #64748B;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+          }
+          .passcode-val {
+            font-size: 24px;
+            font-weight: 900;
+            color: #4F46E5;
+            letter-spacing: 4px;
+            margin: 2px 0 0;
+          }
+          .details-box {
+            padding: 20px;
+          }
+          .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #F1F5F9;
+            font-size: 13px;
+          }
+          .detail-row:last-child {
+            border-bottom: none;
+          }
+          .detail-key {
+            color: #64748B;
+            font-weight: 600;
+          }
+          .detail-val {
+            color: #0F172A;
+            font-weight: 700;
+            text-align: right;
+          }
+          .footer-note {
+            background: #F1F5F9;
+            padding: 12px 16px;
+            text-align: center;
+            font-size: 11.5px;
+            color: #475569;
+            border-top: 1px solid #E2E8F0;
+            line-height: 1.4;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="pass-card">
+          <div class="header">
+            <h1 class="society-name">${societyName}</h1>
+            <p class="pass-sub">Pre-Approved Visitor Entry Pass</p>
+            <div class="status-badge">${statusLabel}</div>
+          </div>
+
+          <div class="qr-wrapper">
+            <img class="qr-img" src="${visitor.qrCodeDataUrl}" alt="Gate Pass QR" />
+            <div class="passcode-box">
+              <div class="passcode-label">Gate Passcode / OTP</div>
+              <div class="passcode-val">${visitor.passcode}</div>
+            </div>
+          </div>
+
+          <div class="details-box">
+            <div class="detail-row">
+              <span class="detail-key">Visitor Name</span>
+              <span class="detail-val">${visitor.visitorName}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-key">Visiting Flat</span>
+              <span class="detail-val">Flat ${flatNo}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-key">Host Resident</span>
+              <span class="detail-val">${hostName}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-key">Category</span>
+              <span class="detail-val">${visitor.visitorType || 'Guest'}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-key">Persons Allowed</span>
+              <span class="detail-val">${visitor.numberOfMembers || 1} Person(s)</span>
+            </div>
+            ${visitor.vehicleNumber ? `
+            <div class="detail-row">
+              <span class="detail-key">Vehicle Number</span>
+              <span class="detail-val">${visitor.vehicleNumber}</span>
+            </div>` : ''}
+            <div class="detail-row">
+              <span class="detail-key">Valid Until</span>
+              <span class="detail-val">${validUntilStr}</span>
+            </div>
+          </div>
+
+          <div class="footer-note">
+            🛡️ Please show this QR code or 6-digit passcode to the security guard at the gate for fast entry.
+          </div>
+        </div>
+      </body>
+      </html>
+    `);
+  } catch (err) {
+    next(err);
+  }
+};

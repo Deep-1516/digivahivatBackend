@@ -12,8 +12,19 @@ const logExpense = async (req, res, next) => {
   try {
     const { eventId, title, amount, category, notes, date } = req.body;
 
-    const event = await Event.findById(eventId);
-    if (!event) return res.status(404).json({ success: false, message: 'Event not found.' });
+    let targetSocietyId = req.user.societyId?._id || req.user.societyId;
+    let validEventId = null;
+
+    if (eventId && eventId !== 'general' && eventId !== 'null' && eventId !== 'undefined') {
+      const event = await Event.findById(eventId);
+      if (!event) return res.status(404).json({ success: false, message: 'Event not found.' });
+      targetSocietyId = event.societyId || targetSocietyId;
+      validEventId = event._id;
+    }
+
+    if (!targetSocietyId) {
+      return res.status(400).json({ success: false, message: 'No society associated with user.' });
+    }
 
     // req.file is set by Multer/Cloudinary middleware when a file is uploaded
     const receiptImageUrl = req.file?.path ?? null;
@@ -29,8 +40,8 @@ const logExpense = async (req, res, next) => {
     }
 
     const expense = await Expense.create({
-      societyId:       event.societyId,
-      eventId,
+      societyId:       targetSocietyId,
+      eventId:         validEventId,
       title,
       amount,
       category:        category  || 'Miscellaneous',

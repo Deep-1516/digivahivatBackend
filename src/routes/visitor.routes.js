@@ -14,7 +14,11 @@ const {
   getSocietyVisitors,
   getMyVisitors,
   cancelPreApproval,
+  getPublicGatePass,
 } = require('../controllers/visitor.controller');
+
+// Public Gate Pass View (for WhatsApp / SMS guests without app login)
+router.get('/pass/:id', getPublicGatePass);
 
 // Resident routes
 router.post('/pre-approve',       protect, preApproveVisitor);

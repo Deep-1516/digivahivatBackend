@@ -78,7 +78,10 @@ const validateContribution = [
 
 // ─── Expenses ─────────────────────────────────────────────────────────────────
 const validateExpense = [
-  body('eventId').notEmpty().withMessage('eventId is required.').isMongoId().withMessage('Invalid eventId.'),
+  body('eventId')
+    .optional({ nullable: true, checkFalsy: true })
+    .isMongoId()
+    .withMessage('Invalid eventId.'),
   body('title').trim().notEmpty().withMessage('Expense title is required.'),
   body('amount')
     .notEmpty().withMessage('Amount is required.')

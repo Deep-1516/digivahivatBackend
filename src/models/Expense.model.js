@@ -17,7 +17,7 @@ const expenseSchema = new mongoose.Schema(
     eventId: {
       type:     mongoose.Schema.Types.ObjectId,
       ref:      'Event',
-      required: [true, 'Event ID is required'],
+      default:  null,
       index:    true,
     },
     title: {
