@@ -249,8 +249,11 @@ const generatePdfReceipt = async (req, res, next) => {
       },
     });
 
+    const isInline = req.query.view === '1' || req.query.view === 'true' || req.query.inline === '1' || req.query.inline === 'true';
+    const disposition = isInline ? 'inline' : 'attachment';
+
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="Falo_Receipt_${receiptShort}.pdf"`);
+    res.setHeader('Content-Disposition', `${disposition}; filename="Falo_Receipt_${receiptShort}.pdf"`);
     doc.pipe(res);
 
     // ── Coordinates & Sizing ─────────────────────────────────────────────────

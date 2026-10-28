@@ -39,6 +39,17 @@ const createEvent = async (req, res, next) => {
 // ─── GET /api/events ──────────────────────────────────────────────────────────
 const getAllEvents = async (req, res, next) => {
   try {
+    // Auto-close events whose endDate is in the past (before start of today)
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    await Event.updateMany(
+      {
+        isActive: true,
+        endDate: { $ne: null, $lt: startOfToday },
+      },
+      { $set: { isActive: false } }
+    );
+
     // Scope events to the requester's society (SuperAdmin sees all)
     const filter = {};
     if (req.user.role !== 'SuperAdmin') {
