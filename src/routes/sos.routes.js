@@ -18,9 +18,11 @@ const {
   acknowledgeAlert,
   resolveAlert,
   cancelAlert,
+  sendTestNotification,
 } = require('../controllers/sos.controller');
 
 router.post('/',                  protect, triggerAlert);
+router.post('/test-notification', protect, sendTestNotification);
 router.get('/active',             protect, getActiveAlerts);
 router.get('/history',            protect, getAlertHistory);
 router.put('/:id/acknowledge',     protect, acknowledgeAlert);

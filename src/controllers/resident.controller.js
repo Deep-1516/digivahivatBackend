@@ -189,9 +189,15 @@ const saveFcmToken = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Valid fcmToken is required.' });
     }
 
+    const cleanToken = fcmToken.trim();
     await Resident.findByIdAndUpdate(req.user._id, {
-      $addToSet: { fcmTokens: fcmToken.trim() },
+      $addToSet: { fcmTokens: cleanToken },
     });
+
+    console.log('\n═══════════════════════════════════════════════════════════════');
+    console.log(`📱 [Backend FCM Token Stored] User: ${req.user.name || req.user._id}`);
+    console.log('Token:', cleanToken);
+    console.log('═══════════════════════════════════════════════════════════════\n');
 
     res.json({ success: true, message: 'FCM push token registered successfully.' });
   } catch (err) {

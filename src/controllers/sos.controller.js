@@ -58,14 +58,19 @@ const triggerAlert = async (req, res, next) => {
     // Asynchronous Push Notification broadcast to all society members & admins
     (async () => {
       try {
+        console.log(`📡 [SOS Broadcast] Searching recipients for society: ${societyId} (excluding sender: ${resident.name})`);
         const recipients = await Resident.find({
           societyId,
           _id: { $ne: resident._id },
-          fcmTokens: { $exists: true, $ne: [] },
-        }).select('fcmTokens');
+        }).select('name phone fcmTokens');
 
         const allTokens = [...new Set(recipients.flatMap((r) => r.fcmTokens || []).filter(Boolean))];
-        if (allTokens.length > 0) {
+        console.log(`📡 [SOS Broadcast] Society members found: ${recipients.length}, Total active FCM device tokens: ${allTokens.length}`);
+
+        if (allTokens.length === 0) {
+          console.warn(`⚠️ [SOS Broadcast] No other active FCM device tokens registered in society "${societyId}". Log into other resident accounts on phones/emulators to register their push tokens.`);
+        } else {
+          console.log(`🚀 [SOS Broadcast] Dispatching push notification to ${allTokens.length} device(s)...`);
           const pushResult = await sendSosNotification({
             tokens: allTokens,
             senderName: resident.name,
@@ -77,6 +82,7 @@ const triggerAlert = async (req, res, next) => {
 
           // Clean up invalid or uninstalled tokens automatically
           if (pushResult?.deadTokens?.length) {
+            console.log(`🧹 [SOS Broadcast] Cleaning up ${pushResult.deadTokens.length} expired token(s) from database.`);
             await Resident.updateMany(
               { fcmTokens: { $in: pushResult.deadTokens } },
               { $pull: { fcmTokens: { $in: pushResult.deadTokens } } }
@@ -246,6 +252,50 @@ const cancelAlert = async (req, res, next) => {
   }
 };
 
+// ─── POST /api/sos/test-notification ─────────────────────────────────────────
+/**
+ * Developer & User verification endpoint.
+ * Sends an immediate test SOS notification to the currently logged-in user's device.
+ */
+const sendTestNotification = async (req, res, next) => {
+  try {
+    const resident = await Resident.findById(req.user._id);
+    if (!resident) {
+      return res.status(404).json({ success: false, message: 'Resident account not found.' });
+    }
+
+    const tokens = resident.fcmTokens || [];
+    console.log(`🧪 [Test Notification] Triggered by ${resident.name} (${resident.phone}). Tokens found: ${tokens.length}`);
+
+    if (tokens.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No FCM device token registered for your account yet. Make sure you are logged into the mobile app and allowed notification permissions.',
+      });
+    }
+
+    const pushResult = await sendSosNotification({
+      tokens,
+      senderName: resident.name,
+      flatNo: resident.houseOrFlatNo || 'Self-Test',
+      emergencyType: 'Medical (Test)',
+      description: 'Firebase Push Notification is working perfectly!',
+      alertId: 'test_notification_' + Date.now(),
+    });
+
+    res.json({
+      success: pushResult.success,
+      message: pushResult.success
+        ? `✅ Test notification sent! Check your phone/lockscreen.`
+        : `❌ Push notification failed: ${pushResult.error || pushResult.reason}`,
+      tokensCount: tokens.length,
+      details: pushResult,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   triggerAlert,
   getActiveAlerts,
@@ -253,4 +303,5 @@ module.exports = {
   acknowledgeAlert,
   resolveAlert,
   cancelAlert,
+  sendTestNotification,
 };
