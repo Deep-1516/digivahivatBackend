@@ -83,12 +83,7 @@ const getAllResidents = async (req, res, next) => {
       filter.societyId = req.user.societyId?._id || req.user.societyId;
     }
 
-    const residents = await Resident.find(filter)
-      .select('-password')
-      .populate('societyId', 'name')
-      .sort({ createdAt: -1 });
-
-    // Society stats for the scoped set
+    // Society stats for the scoped set (total houses & population of the society)
     const matchStage = filter.societyId
       ? { societyId: new mongoose.Types.ObjectId(filter.societyId.toString()) }
       : {};
@@ -99,6 +94,18 @@ const getAllResidents = async (req, res, next) => {
     ]);
 
     const { totalHouses = 0, totalPopulation = 0 } = stats[0] || {};
+
+    // Privacy Guard: If requester is a regular member (Resident),
+    // only return their own profile in the residents array.
+    // Never expose other society members' personal info to residents.
+    if (req.user.role === 'Resident') {
+      filter._id = req.user._id;
+    }
+
+    const residents = await Resident.find(filter)
+      .select('-password')
+      .populate('societyId', 'name')
+      .sort({ createdAt: -1 });
 
     res.json({
       success: true,

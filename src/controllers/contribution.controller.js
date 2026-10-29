@@ -123,6 +123,12 @@ const getContributions = async (req, res, next) => {
     if (contributionType)  filter.contributionType  = contributionType;
     if (annualYear)        filter.annualYear        = Number(annualYear);
 
+    // Privacy Guard: Regular residents can only view their own contributions.
+    // They are never allowed to inspect other society members' payments or pending dues.
+    if (req.user && req.user.role === 'Resident') {
+      filter.residentId = req.user._id;
+    }
+
     const contributions = await Contribution.find(filter)
       .populate('residentId', 'name phone houseOrFlatNo')
       .populate('eventId',    'title')
