@@ -7,6 +7,8 @@
 const Event        = require('../models/Event.model');
 const Contribution = require('../models/Contribution.model');
 const Expense      = require('../models/Expense.model');
+const Resident     = require('../models/Resident.model');
+const { sendPushNotification } = require('../config/firebase');
 
 // ─── POST /api/events (Admin only) ───────────────────────────────────────────
 const createEvent = async (req, res, next) => {
@@ -29,6 +31,37 @@ const createEvent = async (req, res, next) => {
       excludedResidents: Array.isArray(excludedResidents) ? excludedResidents : [],
       createdBy:  req.user._id,
     });
+
+    // Asynchronous Push Notification broadcast to all society members
+    (async () => {
+      try {
+        const recipients = await Resident.find({
+          societyId,
+          _id: { $ne: req.user._id },
+        }).select('fcmTokens name');
+
+        const allTokens = [...new Set(recipients.flatMap((r) => r.fcmTokens || []).filter(Boolean))];
+        if (allTokens.length > 0) {
+          const pushTitle = `🎊 New Society Event: ${event.title}`;
+          const pushBody = event.targetBudget > 0
+            ? `${event.title} has been scheduled. Target budget: ₹${Number(event.targetBudget).toLocaleString('en-IN')}.`
+            : `A new society event "${event.title}" has been announced.`;
+
+          await sendPushNotification({
+            tokens: allTokens,
+            title: pushTitle,
+            body: pushBody,
+            data: {
+              type: 'NEW_EVENT',
+              eventId: event._id.toString(),
+            },
+            channelId: 'society_general',
+          });
+        }
+      } catch (pushErr) {
+        console.warn('⚠️ [Event Push Notification Error]:', pushErr.message);
+      }
+    })();
 
     res.status(201).json({ success: true, message: 'Event created.', data: event });
   } catch (err) {

@@ -8,6 +8,7 @@ const Contribution = require('../models/Contribution.model');
 const Event        = require('../models/Event.model');
 const Resident     = require('../models/Resident.model');
 const Society      = require('../models/Society.model');
+const { sendPushNotification } = require('../config/firebase');
 
 // ─── POST /api/contributions (Admin only) ────────────────────────────────────
 const recordContribution = async (req, res, next) => {
@@ -104,6 +105,36 @@ const recordContribution = async (req, res, next) => {
       { path: 'residentId', select: 'name phone houseOrFlatNo' },
       { path: 'eventId',    select: 'title' },
     ]);
+
+    // Asynchronous Push Notification to the Resident
+    (async () => {
+      try {
+        const payer = await Resident.findById(residentId).select('fcmTokens name houseOrFlatNo');
+        if (payer && payer.fcmTokens?.length) {
+          const isAnnual = contributionType === 'Annual';
+          const pushTitle = isAnnual
+            ? `✅ Maintenance Paid — Flat ${payer.houseOrFlatNo || ''}`
+            : `🎉 Payment Confirmed — ${contribution.eventId?.title || 'Society Event'}`;
+          const pushBody = isAnnual
+            ? `Maintenance payment of ₹${amount} for year ${annualYear} has been recorded. Tap to view your PDF receipt.`
+            : `Your contribution of ₹${amount} for ${contribution.eventId?.title || 'the event'} has been recorded. Tap to view receipt.`;
+
+          await sendPushNotification({
+            tokens: payer.fcmTokens,
+            title: pushTitle,
+            body: pushBody,
+            data: {
+              type: isAnnual ? 'MAINTENANCE_PAID' : 'CONTRIBUTION_RECORDED',
+              contributionId: contribution._id.toString(),
+              annualYear: String(annualYear || ''),
+            },
+            channelId: 'society_general',
+          });
+        }
+      } catch (pushErr) {
+        console.warn('⚠️ [Payment Push Notification Error]:', pushErr.message);
+      }
+    })();
 
     res.status(201).json({ success: true, message: 'Contribution recorded.', data: contribution });
   } catch (err) {

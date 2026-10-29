@@ -8,6 +8,7 @@ const crypto   = require('crypto');
 const QRCode   = require('qrcode');
 const Visitor  = require('../models/Visitor.model');
 const Resident = require('../models/Resident.model');
+const { sendPushNotification } = require('../config/firebase');
 
 // Helper: Generate unique 6-digit passcode
 function generateNumericPasscode() {
@@ -230,6 +231,28 @@ exports.checkInVisitor = async (req, res, next) => {
 
     await visitor.save();
 
+    // Asynchronous Push Notification to Host Resident
+    (async () => {
+      try {
+        const host = await Resident.findById(visitor.residentId).select('fcmTokens name');
+        if (host && host.fcmTokens?.length) {
+          await sendPushNotification({
+            tokens: host.fcmTokens,
+            title: `🚪 Visitor at Gate: ${visitor.visitorName}`,
+            body: `${visitor.visitorName} (${visitor.visitorType || 'Guest'}) has entered the gate for Flat ${visitor.flatNo}.`,
+            data: {
+              type: 'VISITOR_ARRIVED',
+              visitorId: visitor._id.toString(),
+              flatNo: visitor.flatNo || '',
+            },
+            channelId: 'society_general',
+          });
+        }
+      } catch (pushErr) {
+        console.warn('⚠️ [Visitor Push Notification Error]:', pushErr.message);
+      }
+    })();
+
     res.json({
       success: true,
       message: `Entry logged for ${visitor.visitorName} (${visitor.numberOfMembers} member${visitor.numberOfMembers > 1 ? 's' : ''}). Gate opened.`,
@@ -255,6 +278,28 @@ exports.checkOutVisitor = async (req, res, next) => {
     visitor.status = 'Exited';
     visitor.exitTime = new Date();
     await visitor.save();
+
+    // Asynchronous Push Notification to Host Resident
+    (async () => {
+      try {
+        const host = await Resident.findById(visitor.residentId).select('fcmTokens name');
+        if (host && host.fcmTokens?.length) {
+          await sendPushNotification({
+            tokens: host.fcmTokens,
+            title: `👋 Visitor Checked Out: ${visitor.visitorName}`,
+            body: `${visitor.visitorName} has exited the society gate for Flat ${visitor.flatNo}.`,
+            data: {
+              type: 'VISITOR_EXITED',
+              visitorId: visitor._id.toString(),
+              flatNo: visitor.flatNo || '',
+            },
+            channelId: 'society_general',
+          });
+        }
+      } catch (pushErr) {
+        console.warn('⚠️ [Visitor Checkout Notification Error]:', pushErr.message);
+      }
+    })();
 
     res.json({
       success: true,

@@ -156,9 +156,113 @@ async function sendSosNotification({
   }
 }
 
+/**
+ * Clean up invalid or uninstalled FCM tokens from Resident models
+ */
+async function cleanDeadTokens(deadTokens = []) {
+  if (!Array.isArray(deadTokens) || deadTokens.length === 0) return;
+  try {
+    const Resident = require('../models/Resident.model');
+    await Resident.updateMany(
+      { fcmTokens: { $in: deadTokens } },
+      { $pull: { fcmTokens: { $in: deadTokens } } }
+    );
+    console.log(`🧹 [Firebase] Cleaned up ${deadTokens.length} expired token(s) from database.`);
+  } catch (err) {
+    console.warn('⚠️ [Firebase] Token cleanup error:', err.message);
+  }
+}
+
+/**
+ * Sends general push notification to a list of tokens (notices, visitor arrivals, payments, complaints, events)
+ */
+async function sendPushNotification({
+  tokens = [],
+  title = '',
+  body = '',
+  data = {},
+  channelId = 'society_general',
+  priority = 'high',
+}) {
+  if (!isInitialized || !admin) {
+    console.log(`ℹ️  [Firebase] Simulated push notification: "${title}" to ${tokens.length} device(s) (Firebase credentials pending).`);
+    return { success: false, reason: 'FIREBASE_NOT_CONFIGURED', count: tokens.length };
+  }
+
+  const validTokens = [...new Set(tokens.filter(Boolean))];
+  if (validTokens.length === 0) {
+    return { success: true, count: 0 };
+  }
+
+  // Ensure all data values are strings for FCM payload compatibility
+  const stringData = {};
+  for (const [k, v] of Object.entries(data || {})) {
+    stringData[k] = v !== null && v !== undefined ? String(v) : '';
+  }
+
+  const message = {
+    tokens: validTokens,
+    notification: {
+      title,
+      body,
+    },
+    data: stringData,
+    android: {
+      priority: priority === 'high' ? 'high' : 'normal',
+      notification: {
+        channelId: channelId || 'society_general',
+        defaultSound: true,
+        defaultVibrateTimings: true,
+      },
+    },
+    apns: {
+      payload: {
+        aps: {
+          sound: 'default',
+          badge: 1,
+        },
+      },
+    },
+  };
+
+  try {
+    const response = await admin.messaging().sendEachForMulticast(message);
+    console.log(`📣 [Firebase Push Notification] "${title}" Sent: ${response.successCount} succeeded, ${response.failureCount} failed.`);
+
+    const deadTokens = [];
+    response.responses.forEach((resp, idx) => {
+      if (!resp.success) {
+        const errCode = resp.error?.code;
+        if (
+          errCode === 'messaging/invalid-registration-token' ||
+          errCode === 'messaging/registration-token-not-registered'
+        ) {
+          deadTokens.push(validTokens[idx]);
+        }
+      }
+    });
+
+    if (deadTokens.length > 0) {
+      await cleanDeadTokens(deadTokens);
+    }
+
+    return {
+      success: true,
+      successCount: response.successCount,
+      failureCount: response.failureCount,
+      deadTokens,
+    };
+  } catch (err) {
+    console.error('❌ [Firebase] Failed to send push notification:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
 module.exports = {
   admin,
   isFirebaseConfigured: () => isInitialized,
   sendSosNotification,
+  sendPushNotification,
+  cleanDeadTokens,
 };
 

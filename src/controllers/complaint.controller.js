@@ -10,6 +10,8 @@
  * - Society Admins can view and manage all complaints from members of their society.
  */
 const Complaint = require('../models/Complaint.model');
+const Resident = require('../models/Resident.model');
+const { sendPushNotification } = require('../config/firebase');
 
 // ─── POST /api/complaints (Residents & Admins) ────────────────────────────────
 const createComplaint = async (req, res, next) => {
@@ -42,6 +44,36 @@ const createComplaint = async (req, res, next) => {
     await complaint.populate([
       { path: 'residentId', select: 'name phone houseOrFlatNo' },
     ]);
+
+    // Asynchronous Push Notification to Society Admins
+    (async () => {
+      try {
+        const admins = await Resident.find({
+          societyId: targetSocietyId,
+          role: { $in: ['Admin', 'SuperAdmin'] },
+          _id: { $ne: req.user._id },
+        }).select('fcmTokens name');
+
+        const adminTokens = [...new Set(admins.flatMap((a) => a.fcmTokens || []).filter(Boolean))];
+        if (adminTokens.length > 0) {
+          const flatLabel = complaint.unitOrFlat
+            ? `Flat ${complaint.unitOrFlat}`
+            : (req.user.houseOrFlatNo ? `Flat ${req.user.houseOrFlatNo}` : 'Resident');
+          await sendPushNotification({
+            tokens: adminTokens,
+            title: `📝 New ${complaint.type}: ${flatLabel}`,
+            body: `${req.user.name} submitted a ${complaint.category} ${complaint.type.toLowerCase()}: "${complaint.title}"`,
+            data: {
+              type: 'NEW_COMPLAINT',
+              complaintId: complaint._id.toString(),
+            },
+            channelId: 'society_general',
+          });
+        }
+      } catch (pushErr) {
+        console.warn('⚠️ [Admin Complaint Notification Error]:', pushErr.message);
+      }
+    })();
 
     res.status(201).json({
       success: true,
@@ -157,6 +189,34 @@ const updateComplaintStatus = async (req, res, next) => {
       { path: 'residentId', select: 'name phone houseOrFlatNo' },
       { path: 'resolvedBy', select: 'name role' },
     ]);
+
+    // Asynchronous Push Notification to Creator Resident
+    (async () => {
+      try {
+        const creator = await Resident.findById(complaint.residentId).select('fcmTokens name');
+        if (creator && creator.fcmTokens?.length) {
+          const statusIcon = complaint.status === 'Resolved' ? '✅' : complaint.status === 'Rejected' ? '❌' : '🔄';
+          const pushTitle = `${statusIcon} Complaint ${complaint.status}: ${complaint.title}`;
+          const pushBody = complaint.adminResponse
+            ? `Admin response: "${complaint.adminResponse}"`
+            : `Your ${complaint.type.toLowerCase()} has been marked as "${complaint.status}".`;
+
+          await sendPushNotification({
+            tokens: creator.fcmTokens,
+            title: pushTitle,
+            body: pushBody,
+            data: {
+              type: 'COMPLAINT_UPDATED',
+              complaintId: complaint._id.toString(),
+              status: complaint.status,
+            },
+            channelId: 'society_general',
+          });
+        }
+      } catch (pushErr) {
+        console.warn('⚠️ [Complaint Status Push Notification Error]:', pushErr.message);
+      }
+    })();
 
     res.json({
       success: true,

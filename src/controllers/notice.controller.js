@@ -5,6 +5,8 @@
  * Admins post notices; all society residents can read them.
  */
 const Notice = require('../models/Notice.model');
+const Resident = require('../models/Resident.model');
+const { sendPushNotification } = require('../config/firebase');
 
 // ─── POST /api/notices (Admin only) ──────────────────────────────────────────
 const createNotice = async (req, res, next) => {
@@ -34,6 +36,44 @@ const createNotice = async (req, res, next) => {
     });
 
     await notice.populate('postedBy', 'name role');
+
+    // Asynchronous Push Notification broadcast to all society members
+    (async () => {
+      try {
+        const recipients = await Resident.find({
+          societyId: targetSocietyId,
+          _id: { $ne: req.user._id },
+        }).select('fcmTokens name');
+
+        const allTokens = [...new Set(recipients.flatMap((r) => r.fcmTokens || []).filter(Boolean))];
+        if (allTokens.length > 0) {
+          const isUrgent = notice.priority === 'Urgent';
+          const pushTitle = isUrgent
+            ? `🚨 URGENT NOTICE: ${notice.title}`
+            : `📢 Society Notice: ${notice.title}`;
+          const pushBody =
+            notice.description.length > 120
+              ? `${notice.description.substring(0, 117)}...`
+              : notice.description;
+
+          await sendPushNotification({
+            tokens: allTokens,
+            title: pushTitle,
+            body: pushBody,
+            data: {
+              type: 'NOTICE',
+              noticeId: notice._id.toString(),
+              category: notice.category || 'General',
+              priority: notice.priority || 'Normal',
+            },
+            channelId: isUrgent ? 'emergency_sos_alarm' : 'society_general',
+            priority: 'high',
+          });
+        }
+      } catch (pushErr) {
+        console.warn('⚠️ [Notice Notification Error]:', pushErr.message);
+      }
+    })();
 
     res.status(201).json({ success: true, message: 'Notice posted successfully.', data: notice });
   } catch (err) {
