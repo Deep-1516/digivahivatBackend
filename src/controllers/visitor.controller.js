@@ -67,7 +67,7 @@ exports.preApproveVisitor = async (req, res, next) => {
 
     // Payload encoded inside the QR Code
     const qrPayload = JSON.stringify({
-      app:     'FALO_VMS',
+      app:     'SKY_SOCIETY_VMS',
       passId:  qrToken,
       code:    passcode,
       flat:    flatNo,
@@ -380,7 +380,7 @@ exports.getMyVisitors = async (req, res, next) => {
       if (!visitors[i].qrCodeDataUrl) {
         try {
           const qrPayload = JSON.stringify({
-            app:     'FALO_VMS',
+            app:     'SKY_SOCIETY_VMS',
             passId:  visitors[i].qrToken,
             code:    visitors[i].passcode,
             flat:    visitors[i].flatNo,
@@ -451,7 +451,7 @@ exports.getGatePassQrImage = async (req, res, next) => {
     }
 
     const qrPayload = JSON.stringify({
-      app:     'FALO_VMS',
+      app:     'SKY_SOCIETY_VMS',
       passId:  visitor.qrToken,
       code:    visitor.passcode,
       flat:    visitor.flatNo,

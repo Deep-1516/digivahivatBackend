@@ -76,7 +76,7 @@ app.use('/api/visitors',      visitorRoutes);
 app.use('/api/sos',           sosRoutes);
 
 // ─── Health Check ─────────────────────────────────────────────────────────────
-app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'Falo API' }));
+app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'Sky Society API' }));
 
 // ─── 404 Handler ─────────────────────────────────────────────────────────────
 app.use((_req, res) => {

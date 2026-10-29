@@ -246,7 +246,7 @@ const generatePdfReceipt = async (req, res, next) => {
       society = await Society.findById(req.user.societyId?._id || req.user.societyId);
     }
 
-    const societyName = (society?.name || 'FALO SOCIETY RESIDENTIAL COMMUNITY').toUpperCase();
+    const societyName = (society?.name || 'SKY SOCIETY RESIDENTIAL COMMUNITY').toUpperCase();
     const addressParts = [society?.address, society?.city].filter(Boolean);
     const societyAddress = addressParts.length > 0 ? addressParts.join(', ') : 'Registered Society Office';
 
@@ -281,7 +281,7 @@ const generatePdfReceipt = async (req, res, next) => {
       margin: 0,
       info: {
         Title: `Payment Receipt - ${receiptNo}`,
-        Author: 'FALO App',
+        Author: 'Sky Society App',
         Subject: `Payment Receipt for ${residentName}`,
       },
     });
@@ -290,7 +290,7 @@ const generatePdfReceipt = async (req, res, next) => {
     const disposition = isInline ? 'inline' : 'attachment';
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `${disposition}; filename="Falo_Receipt_${receiptShort}.pdf"`);
+    res.setHeader('Content-Disposition', `${disposition}; filename="SkySociety_Receipt_${receiptShort}.pdf"`);
     doc.pipe(res);
 
     // ── Coordinates & Sizing ─────────────────────────────────────────────────
@@ -347,7 +347,7 @@ const generatePdfReceipt = async (req, res, next) => {
 
     // App & Tagline
     doc.fillColor('#FDBA74').font('Helvetica-Bold').fontSize(8)
-       .text('FALO SOCIETY MANAGEMENT PLATFORM', M, 20, { width: CW, align: 'center', characterSpacing: 1 });
+       .text('SKY SOCIETY MANAGEMENT PLATFORM', M, 20, { width: CW, align: 'center', characterSpacing: 1 });
 
     // Society Name
     doc.fillColor(C.white).font('Helvetica-Bold').fontSize(11.5)
@@ -474,7 +474,7 @@ const generatePdfReceipt = async (req, res, next) => {
 
     doc.fillColor(C.green).font('Helvetica-Bold').fontSize(8.5).text('AUTHENTICATED DIGITAL VOUCHER', M + 10, authY + 8);
     doc.fillColor(C.textMuted).font('Helvetica').fontSize(7.5).text('Status: Payment Verified & Credited to Society Account', M + 10, authY + 21, { width: stampW - 20 });
-    doc.fillColor(C.textMuted).font('Helvetica').fontSize(7.5).text(`Verification Ref: FALO-${receiptShort.slice(-6)}-LEDGER-OK`, M + 10, authY + 34);
+    doc.fillColor(C.textMuted).font('Helvetica').fontSize(7.5).text(`Verification Ref: SKY-${receiptShort.slice(-6)}-LEDGER-OK`, M + 10, authY + 34);
     doc.fillColor(C.textMuted).font('Helvetica-Oblique').fontSize(7).text('System generated e-receipt. Valid without physical signature.', M + 10, authY + 50, { width: stampW - 20 });
 
     const sigX = M + stampW + 12;
@@ -496,7 +496,7 @@ const generatePdfReceipt = async (req, res, next) => {
     );
 
     doc.fillColor('#94A3B8').font('Helvetica').fontSize(7).text(
-      `FALO Society Management Ledger  |  Generated on ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}  |  Page 1 of 1`,
+      `Sky Society Management Ledger  |  Generated on ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}  |  Page 1 of 1`,
       M, footY + 28, { width: CW, align: 'center' }
     );
 
