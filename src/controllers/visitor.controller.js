@@ -330,6 +330,29 @@ exports.getMyVisitors = async (req, res, next) => {
       .populate('verifiedByGuardId', 'name')
       .sort({ createdAt: -1 });
 
+    // Ensure every visitor record has a valid QR Code data URL
+    for (let i = 0; i < visitors.length; i++) {
+      if (!visitors[i].qrCodeDataUrl) {
+        try {
+          const qrPayload = JSON.stringify({
+            app:     'FALO_VMS',
+            passId:  visitors[i].qrToken,
+            code:    visitors[i].passcode,
+            flat:    visitors[i].flatNo,
+            name:    visitors[i].visitorName,
+            members: visitors[i].numberOfMembers || 1,
+          });
+          visitors[i].qrCodeDataUrl = await QRCode.toDataURL(qrPayload, {
+            errorCorrectionLevel: 'H',
+            margin: 2,
+            scale: 8,
+            color: { dark: '#0A192F', light: '#FFFFFF' },
+          });
+          Visitor.updateOne({ _id: visitors[i]._id }, { qrCodeDataUrl: visitors[i].qrCodeDataUrl }).exec();
+        } catch (_) {}
+      }
+    }
+
     res.json({
       success: true,
       count: visitors.length,
@@ -361,6 +384,46 @@ exports.cancelPreApproval = async (req, res, next) => {
       success: true,
       message: 'Gate pass cancelled successfully.',
       data: visitor,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── GET /api/visitors/pass/:id/qr (Direct PNG QR Code Image) ───────────────
+exports.getGatePassQrImage = async (req, res, next) => {
+  try {
+    const mongoose = require('mongoose');
+    const isId = mongoose.Types.ObjectId.isValid(req.params.id);
+
+    const query = isId
+      ? { $or: [{ _id: req.params.id }, { qrToken: req.params.id }] }
+      : { qrToken: req.params.id };
+
+    const visitor = await Visitor.findOne(query);
+    if (!visitor) {
+      return res.status(404).json({ success: false, message: 'Gate pass not found.' });
+    }
+
+    const qrPayload = JSON.stringify({
+      app:     'FALO_VMS',
+      passId:  visitor.qrToken,
+      code:    visitor.passcode,
+      flat:    visitor.flatNo,
+      name:    visitor.visitorName,
+      members: visitor.numberOfMembers || 1,
+    });
+
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    QRCode.toFileStream(res, qrPayload, {
+      errorCorrectionLevel: 'H',
+      margin: 2,
+      scale: 8,
+      color: {
+        dark:  '#0A192F',
+        light: '#FFFFFF',
+      },
     });
   } catch (err) {
     next(err);

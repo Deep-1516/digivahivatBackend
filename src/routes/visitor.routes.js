@@ -15,9 +15,11 @@ const {
   getMyVisitors,
   cancelPreApproval,
   getPublicGatePass,
+  getGatePassQrImage,
 } = require('../controllers/visitor.controller');
 
-// Public Gate Pass View (for WhatsApp / SMS guests without app login)
+// Public Gate Pass View & Direct QR Image (for WhatsApp / SMS guests without app login)
+router.get('/pass/:id/qr', getGatePassQrImage);
 router.get('/pass/:id', getPublicGatePass);
 
 // Resident routes
