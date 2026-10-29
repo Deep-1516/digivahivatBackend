@@ -108,9 +108,9 @@ async function sendSosNotification({
     android: {
       priority: 'high',
       notification: {
-        channelId: 'emergency_sos',
+        channelId: 'emergency_sos_alarm',
         priority: 'max',
-        sound: 'default',
+        sound: 'sos_alarm',
         color: '#DC2626',
         defaultVibrateTimings: true,
       },
@@ -118,7 +118,7 @@ async function sendSosNotification({
     apns: {
       payload: {
         aps: {
-          sound: 'default',
+          sound: 'sos_alarm.wav',
           badge: 1,
           contentAvailable: true,
         },
