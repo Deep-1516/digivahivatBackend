@@ -30,8 +30,8 @@ const addResident = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'societyId is required.' });
     }
 
-    // Admin can only assign Resident or Admin — not SuperAdmin
-    const assignedRole = role && ['Admin', 'Resident'].includes(role) ? role : 'Resident';
+    // Admin can assign Resident, Admin, or Guard — not SuperAdmin
+    const assignedRole = role && ['Admin', 'Resident', 'Guard', 'Gaurd'].includes(role) ? (role === 'Gaurd' ? 'Guard' : role) : 'Resident';
 
     const existing = await Resident.findOne({ phone });
     if (existing) {

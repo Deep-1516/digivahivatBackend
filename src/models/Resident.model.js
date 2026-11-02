@@ -44,7 +44,7 @@ const residentSchema = new mongoose.Schema(
     },
     role: {
       type:    String,
-      enum:    ['SuperAdmin', 'Admin', 'Resident'],
+      enum:    ['SuperAdmin', 'Admin', 'Resident', 'Guard', 'Gaurd'],
       default: 'Resident',
     },
     /**

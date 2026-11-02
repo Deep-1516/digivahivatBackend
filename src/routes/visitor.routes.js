@@ -5,7 +5,7 @@
  * Pre-approval, QR verification, Gate Check-In, Check-Out, and History.
  */
 const router = require('express').Router();
-const { protect, adminOnly } = require('../middlewares/auth.middleware');
+const { protect, adminOnly, guardOrAdminOnly } = require('../middlewares/auth.middleware');
 const {
   preApproveVisitor,
   verifyPass,
@@ -28,9 +28,9 @@ router.get('/my-visitors',        protect, getMyVisitors);
 router.patch('/:id/cancel',       protect, cancelPreApproval);
 
 // Guard / Admin gate operations
-router.post('/verify',            protect, adminOnly, verifyPass);
-router.post('/checkin',           protect, adminOnly, checkInVisitor);
-router.post('/:id/checkout',      protect, adminOnly, checkOutVisitor);
-router.get('/society-register',   protect, adminOnly, getSocietyVisitors);
+router.post('/verify',            protect, guardOrAdminOnly, verifyPass);
+router.post('/checkin',           protect, guardOrAdminOnly, checkInVisitor);
+router.post('/:id/checkout',      protect, guardOrAdminOnly, checkOutVisitor);
+router.get('/society-register',   protect, guardOrAdminOnly, getSocietyVisitors);
 
 module.exports = router;

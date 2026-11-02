@@ -39,6 +39,14 @@ const adminOnly = (req, res, next) => {
   next();
 };
 
+/** Guard, Admin, or SuperAdmin */
+const guardOrAdminOnly = (req, res, next) => {
+  if (!['Admin', 'SuperAdmin', 'Guard', 'Gaurd'].includes(req.user?.role)) {
+    return res.status(403).json({ success: false, message: 'Access denied. Guard or Admin only.' });
+  }
+  next();
+};
+
 /** SuperAdmin only */
 const superAdminOnly = (req, res, next) => {
   if (req.user?.role !== 'SuperAdmin') {
@@ -47,4 +55,4 @@ const superAdminOnly = (req, res, next) => {
   next();
 };
 
-module.exports = { protect, adminOnly, superAdminOnly };
+module.exports = { protect, adminOnly, guardOrAdminOnly, superAdminOnly };
